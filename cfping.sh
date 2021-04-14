@@ -1,16 +1,43 @@
 #!/usr/bin/bash
 
-cidr_url=https://www.cloudflare.com/ips-v4
+CIDR_LIST=${CIDR_LIST:-}
+CIDR_URL=${CIDR_URL:-"https://www.cloudflare.com/ips-v4"}
 
 fping_interval=1
 fping_count=3
 fping_period=1000
-
 st_url=https://speed.cloudflare.com/__down?bytes=125000000
 st_parallel=10
-st_num=100
+st_line=100
+print_line=10
+quiet=false
 
-print_num=10
+function parse_args() {
+    while getopts ":f:u:p:n:lq" opt; do
+        case "$opt" in
+        f)
+            fping_count=$OPTARG
+            ;;
+        u)
+            st_url=$OPTARG
+            ;;
+        p)
+            st_parallel=$OPTARG
+            ;;
+        n)
+            st_line=$OPTARG
+            ;;
+        l)
+            print_line=$OPTARG
+            ;;
+        q)
+            quiet=true
+            ;;
+        *) ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+}
 
 function inet_aton() {
     echo $1 | awk -F'.' '{print $1 * 16777216 + $2 * 65536 + $3 * 256 + $4}'
@@ -49,71 +76,71 @@ function cidr_to_iplist() {
 }
 
 function get_iplist() {
-    local cidrs=
-    if [ $# -ge 1 ]; then
-        case $1 in
-        http* | https*)
-            local url=$1
-            local domain=$(echo $url | awk -F/ '{print $3}')
-            local ip=$(dig +short $domain @1.1.1.1 | head -1)
-            local scheme=$(echo $url | awk -F/ '{print $1}')
-            local port=$([[ "$scheme" =~ "https" ]] && echo 443 || echo 80)
-            cidrs=$(curl -sSL --retry 3 --resolve $domain:$port:$ip $url)
-            ;;
-        *)
-            cidrs=$(cat $1)
-            ;;
-        esac
-    else
-        cidrs=$(cat -)
+    cidr_to_iplist "1.0.0.0/24"
+    cidr_to_iplist "1.1.1.0/24"
+    if [ -n "$CIDR_LIST" ]; then
+        for cidr in $CIDR_LIST; do
+            cidr_to_iplist "$cidr"
+        done
+    elif [ -n "$CIDR_URL" ]; then
+        local domain=$(echo $CIDR_URL | awk -F/ '{print $3}')
+        local ip=$(dig +short $domain @1.1.1.1 | head -1)
+        local scheme=$(echo $CIDR_URL | awk -F/ '{print $1}')
+        local port=$([[ "$scheme" =~ "https" ]] && echo 443 || echo 80)
+        curl -sSL --retry 3 --resolve $domain:$port:$ip $CIDR_URL | while read -r line; do
+            cidr_to_iplist "$line"
+        done
     fi
-    echo "$cidrs" | while read -r line; do
-        cidr_to_iplist $line
+}
+
+function check_file_exists() {
+    for file in "$@"; do
+        [ -f "$file" ] || exit 1
     done
 }
 
 function process_fping() {
-    fping -q -i "${1:-10}" -c "${2:-1}" -p "${3:-5000}" 2>&1 || :
-}
-
-function sort_fping() {
-    awk '{split($5,a,"/"); split($8,b,"/"); if($8) print $1,a[2],b[2]}' | sort -k2,2rn -k3,3n
+    check_file_exists $1
+    fping -f $1 -q -i ${2:-10} -c ${3:-1} -p ${4:-5000} |& awk '{split($5,a,"/"); split($8,b,"/"); if($8) print $1,a[2],b[2]}' | sort -k2,2rn -k3,3n
 }
 
 function speedtest() {
-    [ -d "speedtest_tmpdir" ] || mkdir speedtest_tmpdir
-    local url=${1:-"https://speed.cloudflare.com/__down?bytes=125000000"}
+    check_file_exists $1
+    rm -rf speedtest_tmpdir || :
+    mkdir speedtest_tmpdir
+    local url=${2:-"https://speed.cloudflare.com/__down?bytes=125000000"}
     local domain=$(echo $url | awk -F/ '{print $3}')
     local scheme=$(echo $url | awk -F/ '{print $1}')
     local port=$([[ "$scheme" =~ "https" ]] && echo 443 || echo 80)
-    head -n ${3:-100} | xargs -L 1 -P ${2:-10} sh -c "curl --resolve $domain:$port:\$0 --url $url -o speedtest_tmpdir/\$0 -s --connect-timeout 2 -m 10 || :"
+    head -n ${4:-100} $1 | xargs -L 1 -P ${3:-10} sh -c "curl --resolve $domain:$port:\$0 --url $url -o speedtest_tmpdir/\$0 -s --connect-timeout 2 -m 10 || :"
     find -path './speedtest_tmpdir/*' -type f -printf '%f %s\n' | sort -k2,2rn
-    rm -rf speedtest_tmpdir
-}
-
-function merge_result() {
-    awk 'NR==FNR{a[$1]=$0;next}{print a[$1],$2}' $1 $2
 }
 
 function print_result() {
-    if [ -n "$1" ]; then
-        awk '{printf "  %s\r\033[18Cpackets received: %s\033[3Cping: %s\033[3Cspeed: %.2f MB/s\n",$1,$2,$3,$4/10485760}' | head -n $1
+    check_file_exists $1 $2
+    if [ -n "$3" ]; then
+        awk 'NR==FNR{a[$1]=$2;b[$1]=$3;next}{printf "%s\r\033[18Cpackets received: %s\033[3Cping: %s\033[3Cspeed: %.2f MB/s\n",$1,a[$1],b[$1],$2/10485760}' $1 $2 | head -n $3
     else
-        awk '{printf "  %s\r\033[18Cpackets received: %s\033[3Cping: %s\033[3Cspeed: %.2f MB/s\n",$1,$2,$3,$4/10485760}'
+        awk 'NR==FNR{a[$1]=$2;b[$1]=$3;next}{printf "%s\r\033[18Cpackets received: %s\033[3Cping: %s\033[3Cspeed: %.2f MB/s\n",$1,a[$1],b[$1],$2/10485760}' $1 $2
     fi
 }
 
 function main() {
-    workdir=$(mktemp -d)
-    pushd $workdir >/dev/null
-    get_iplist >ips $cidr_url
-    process_fping <ips >ips_fping $fping_interval $fping_count $fping_period
-    sort_fping <ips_fping >ips_fping_sorted
-    speedtest <ips_fping_sorted >ips_speedtest $st_url $st_parallel $st_num
-    merge_result >ips_fping_speedtest ips_fping_sorted ips_speedtest
-    print_result <ips_fping_speedtest $print_num
-    popd >/dev/null
-    rm -rf $workdir
+    parse_args "$@"
+    local workdir=$(mktemp -d) && trap "rm -rf $workdir; exit 130" SIGINT
+    cd $workdir
+    $quiet || echo "Working directory: $workdir"
+    local ip_result=${workdir:-.}/ips
+    local fping_result=${workdir:-.}/ips_fping
+    local speedtest_result=${workdir:-.}/ips_speedtest
+    get_iplist $CIDR_URL >$ip_result
+    $quiet || echo "$(wc -l <$ip_result) ips have been generate"
+    process_fping $ip_result $fping_interval $fping_count $fping_period >$fping_result
+    $quiet || echo "$(wc -l <$fping_result) ips have been ping"
+    speedtest $fping_result $st_url $st_parallel $st_line >$speedtest_result
+    $quiet || echo "$(wc -l <$speedtest_result) ips have been speedtest"
+    print_result $fping_result $speedtest_result $print_line
+    rm -rf ${workdir:-"$(pwd)"}
 }
 
 main "$@"
