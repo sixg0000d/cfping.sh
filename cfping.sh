@@ -13,7 +13,7 @@ print_line=10
 quiet=false
 
 function parse_args() {
-    while getopts ":f:u:p:n:lq" opt; do
+    while getopts "f:u:p:s:l:q" opt; do
         case "$opt" in
         f)
             fping_count=$OPTARG
@@ -24,7 +24,7 @@ function parse_args() {
         p)
             st_parallel=$OPTARG
             ;;
-        n)
+        s)
             st_line=$OPTARG
             ;;
         l)
