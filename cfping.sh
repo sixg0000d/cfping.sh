@@ -14,7 +14,7 @@ print_line=10
 quiet=false
 
 function parse_args() {
-    while getopts "f:u:p:s:l:q" opt; do
+    while getopts "f:c:u:p:s:l:q" opt; do
         case "$opt" in
         f)
             fping_shuf=$OPTARG
