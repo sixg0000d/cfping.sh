@@ -3,6 +3,7 @@
 CIDR_LIST=${CIDR_LIST:-}
 CIDR_URL=${CIDR_URL:-"https://www.cloudflare.com/ips-v4"}
 
+fping_shuf=
 fping_interval=1
 fping_count=3
 fping_period=1000
@@ -16,6 +17,9 @@ function parse_args() {
     while getopts "f:u:p:s:l:q" opt; do
         case "$opt" in
         f)
+            fping_shuf=$OPTARG
+            ;;
+        c)
             fping_count=$OPTARG
             ;;
         u)
@@ -101,7 +105,9 @@ function check_file_exists() {
 
 function process_fping() {
     check_file_exists $1
-    fping -f $1 -q -i ${2:-10} -c ${3:-1} -p ${4:-5000} |& awk '{split($5,a,"/"); split($8,b,"/"); if($8) print $1,a[2],b[2]}' | sort -k2,2rn -k3,3n
+    fping_list=$1
+    [ -n "$5" ] && cat $1 | shuf | head -n $5 >ips_shuf && fping_list=ips_shuf
+    fping -f $fping_list -q -i ${2:-10} -c ${3:-1} -p ${4:-5000} |& awk '{split($5,a,"/"); split($8,b,"/"); if($8) print $1,a[2],b[2]}' | sort -k2,2rn -k3,3n
 }
 
 function speedtest() {
@@ -135,7 +141,7 @@ function main() {
     local speedtest_result=${workdir:-.}/ips_speedtest
     get_iplist $CIDR_URL >$ip_result
     $quiet || echo "$(wc -l <$ip_result) ips have been generate"
-    process_fping $ip_result $fping_interval $fping_count $fping_period >$fping_result
+    process_fping $ip_result $fping_interval $fping_count $fping_period $fping_shuf >$fping_result
     $quiet || echo "$(wc -l <$fping_result) ips have been ping"
     speedtest $fping_result $st_url $st_parallel $st_line >$speedtest_result
     $quiet || echo "$(wc -l <$speedtest_result) ips have been speedtest"
