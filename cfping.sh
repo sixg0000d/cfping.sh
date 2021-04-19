@@ -106,7 +106,10 @@ function check_file_exists() {
 function process_fping() {
     check_file_exists $1
     fping_list=$1
-    [ -n "$5" ] && cat $1 | shuf | head -n $5 >ips_shuf && fping_list=ips_shuf
+    [ -n "$5" ] && {
+        cat $1 | shuf | head -n $5 >ips_shuf
+        fping_list=ips_shuf
+    }
     fping -f $fping_list -q -i ${2:-10} -c ${3:-1} -p ${4:-5000} |& awk '{split($5,a,"/"); split($8,b,"/"); if($8) print $1,a[2],b[2]}' | sort -k2,2rn -k3,3n
 }
 
