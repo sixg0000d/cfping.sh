@@ -10,11 +10,12 @@ fping_period=1000
 st_url=https://speed.cloudflare.com/__down?bytes=125000000
 st_parallel=10
 st_line=100
+st_time=10
 print_line=10
 quiet=false
 
 function parse_args() {
-    while getopts "f:c:u:p:s:l:q" opt; do
+    while getopts "f:c:u:p:s:t:l:q" opt; do
         case "$opt" in
         f)
             fping_shuf=$OPTARG
@@ -30,6 +31,9 @@ function parse_args() {
             ;;
         s)
             st_line=$OPTARG
+            ;;
+        t)
+            st_time=$OPTARG
             ;;
         l)
             print_line=$OPTARG
@@ -121,16 +125,18 @@ function speedtest() {
     local domain=$(echo $url | awk -F/ '{print $3}')
     local scheme=$(echo $url | awk -F/ '{print $1}')
     local port=$([[ "$scheme" =~ "https" ]] && echo 443 || echo 80)
-    head -n ${4:-100} $1 | xargs -L 1 -P ${3:-10} sh -c "curl --resolve $domain:$port:\$0 --url $url -o speedtest_tmpdir/\$0 -s --connect-timeout 2 -m 10 || :"
+    head -n ${4:-100} $1 | xargs -L 1 -P ${3:-10} sh -c "curl --resolve $domain:$port:\$0 --url $url -o speedtest_tmpdir/\$0 -s --connect-timeout 2 -m ${5:-10} || :"
     find -path './speedtest_tmpdir/*' -type f -printf '%f %s\n' | sort -k2,2rn
 }
 
 function print_result() {
     check_file_exists $1 $2
+    local format='%s\r\033[18Cpackets received: %s\033[3Cping: %s\033[3Cspeed: %.2f MB/s\n'
+    local values='$1,a[$1],b[$1],$2/1048576/'$st_time
     if [ -n "$3" ]; then
-        awk 'NR==FNR{a[$1]=$2;b[$1]=$3;next}{printf "%s\r\033[18Cpackets received: %s\033[3Cping: %s\033[3Cspeed: %.2f MB/s\n",$1,a[$1],b[$1],$2/10485760}' $1 $2 | head -n $3
+        awk 'NR==FNR{a[$1]=$2;b[$1]=$3;next}{printf "'"$format"'",'$values'}' $1 $2 | head -n $3
     else
-        awk 'NR==FNR{a[$1]=$2;b[$1]=$3;next}{printf "%s\r\033[18Cpackets received: %s\033[3Cping: %s\033[3Cspeed: %.2f MB/s\n",$1,a[$1],b[$1],$2/10485760}' $1 $2
+        awk 'NR==FNR{a[$1]=$2;b[$1]=$3;next}{printf "'"$format"'",'$values'}' $1 $2
     fi
 }
 
@@ -146,7 +152,7 @@ function main() {
     $quiet || echo "$(wc -l <$ip_result) ips have been generate"
     process_fping $ip_result $fping_interval $fping_count $fping_period $fping_shuf >$fping_result
     $quiet || echo "$(wc -l <$fping_result) ips have been ping"
-    speedtest $fping_result $st_url $st_parallel $st_line >$speedtest_result
+    speedtest $fping_result $st_url $st_parallel $st_line $st_time >$speedtest_result
     $quiet || echo "$(wc -l <$speedtest_result) ips have been speedtest"
     print_result $fping_result $speedtest_result $print_line
     rm -rf ${workdir:-"$(pwd)"}
