@@ -148,7 +148,7 @@ function main() {
     local ip_result=${workdir:-.}/ips
     local fping_result=${workdir:-.}/ips_fping
     local speedtest_result=${workdir:-.}/ips_speedtest
-    get_iplist $CIDR_URL >$ip_result
+    get_iplist >$ip_result
     $quiet || echo "$(wc -l <$ip_result) ips have been generate"
     process_fping $ip_result $fping_interval $fping_count $fping_period $fping_shuf >$fping_result
     $quiet || echo "$(wc -l <$fping_result) ips have been ping"
